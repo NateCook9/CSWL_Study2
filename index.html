@@ -75,7 +75,7 @@
 <script>
   const jsPsych = initJsPsych({
     on_finish: function() {
-      // Local CSV download for testing before DataPipe/backend integration
+      // Local CSV download for testing
       jsPsych.data.get().localSave('csv', 'cswl_experiment_data.csv');
     }
   });
@@ -91,7 +91,7 @@
     return array;
   }
 
-  // Prevent consecutive trials from sharing the same pair_id
+  // Prevent consecutive trials from sharing the same mp_id
   function shuffleWithoutConsecutivePairs(trials) {
     let isValid = false;
     let shuffled = [...trials];
@@ -102,7 +102,7 @@
       shuffle(shuffled);
       isValid = true;
       for (let i = 0; i < shuffled.length - 1; i++) {
-        if (shuffled[i].pair_id === shuffled[i+1].pair_id) {
+        if (shuffled[i].mp_id === shuffled[i+1].mp_id) {
           isValid = false;
           break;
         }
@@ -115,18 +115,26 @@
   Papa.parse('material_info.csv', {
     download: true,
     header: true,
+    skipEmptyLines: true,
     complete: function(results) {
-      const materials = results.data.filter(row => row.item_id && row.pair_id);
+      // Filter rows checking exact header names from material_info.csv
+      const materials = results.data.filter(row => row.item_id && row.mp_id);
+      
+      if (materials.length === 0) {
+        console.error("No valid rows parsed from material_info.csv. Check column headers.");
+        return;
+      }
+
       runExperiment(materials);
     }
   });
 
   function runExperiment(materials) {
-    // Collect all asset paths for preloading
-    const audioFiles = materials.map(m => `assets/audio/${m.item_id}.mp3`);
-    const imageFiles = materials.map(m => `assets/stims/${m.item_id}.png`);
+    // Collect all asset paths for preloading (trimming spaces)
+    const audioFiles = materials.map(m => `assets/audio/${m.item_id.trim()}.mp3`);
+    const imageFiles = materials.map(m => `assets/stims/${m.item_id.trim()}.png`);
 
-    // 1. Mandatory Asset Preloader Stage
+    // 1. Asset Preloader Stage
     timeline.push({
       type: jsPsychPreload,
       audio: audioFiles,
@@ -136,7 +144,7 @@
       auto_preload: false
     });
 
-    // 2. Instructions Page with Continue Button
+    // 2. Instructions Page
     timeline.push({
       type: jsPsychHtmlButtonResponse,
       stimulus: `
@@ -161,8 +169,8 @@
       let blockTrials = [];
 
       materials.forEach((targetItem, idx) => {
-        // Collect valid non-pair foil candidates
-        const nonPairCandidates = materials.filter(m => m.pair_id !== targetItem.pair_id);
+        // Collect valid non-pair foil candidates using mp_id
+        const nonPairCandidates = materials.filter(m => m.mp_id.trim() !== targetItem.mp_id.trim());
         
         // Select deterministic foil index per block to ensure balanced distribution
         const foilIndex = (idx + (b * 3)) % nonPairCandidates.length;
@@ -170,14 +178,14 @@
 
         // Randomize image placement (Left/Right)
         const targetOnLeft = Math.random() < 0.5;
-        const leftImg = targetOnLeft ? targetItem.item_id : foilItem.item_id;
-        const rightImg = targetOnLeft ? foilItem.item_id : targetItem.item_id;
+        const leftImg = targetOnLeft ? targetItem.item_id.trim() : foilItem.item_id.trim();
+        const rightImg = targetOnLeft ? foilItem.item_id.trim() : targetItem.item_id.trim();
         const correctKey = targetOnLeft ? 'f' : 'j';
 
         blockTrials.push({
-          target_id: targetItem.item_id,
-          pair_id: targetItem.pair_id,
-          target_audio: `assets/audio/${targetItem.item_id}.mp3`,
+          target_id: targetItem.item_id.trim(),
+          mp_id: targetItem.mp_id.trim(),
+          target_audio: `assets/audio/${targetItem.item_id.trim()}.mp3`,
           left_image: `assets/stims/${leftImg}.png`,
           right_image: `assets/stims/${rightImg}.png`,
           correct_response: correctKey,
@@ -194,18 +202,18 @@
     // 4. Generate Final Test Block (Block 5: Minimal Pair Foils)
     let testTrials = [];
     materials.forEach(targetItem => {
-      // Foil is strictly the minimal pair partner
-      const partnerItem = materials.find(m => m.pair_id === targetItem.pair_id && m.item_id !== targetItem.item_id);
+      // Foil is strictly the minimal pair partner matching mp_id
+      const partnerItem = materials.find(m => m.mp_id.trim() === targetItem.mp_id.trim() && m.item_id.trim() !== targetItem.item_id.trim());
       
       const targetOnLeft = Math.random() < 0.5;
-      const leftImg = targetOnLeft ? targetItem.item_id : partnerItem.item_id;
-      const rightImg = targetOnLeft ? partnerItem.item_id : targetItem.item_id;
+      const leftImg = targetOnLeft ? targetItem.item_id.trim() : partnerItem.item_id.trim();
+      const rightImg = targetOnLeft ? partnerItem.item_id.trim() : targetItem.item_id.trim();
       const correctKey = targetOnLeft ? 'f' : 'j';
 
       testTrials.push({
-        target_id: targetItem.item_id,
-        pair_id: targetItem.pair_id,
-        target_audio: `assets/audio/${targetItem.item_id}.mp3`,
+        target_id: targetItem.item_id.trim(),
+        mp_id: targetItem.mp_id.trim(),
+        target_audio: `assets/audio/${targetItem.item_id.trim()}.mp3`,
         left_image: `assets/stims/${leftImg}.png`,
         right_image: `assets/stims/${rightImg}.png`,
         correct_response: correctKey,
@@ -266,7 +274,7 @@
       trial_duration: 4500,
       data: {
         target_id: trialData.target_id,
-        pair_id: trialData.pair_id,
+        mp_id: trialData.mp_id,
         block_num: trialData.block_num,
         block_type: trialData.block_type,
         correct_response: trialData.correct_response,
