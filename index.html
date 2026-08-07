@@ -167,21 +167,20 @@
     const NUM_BLOCKS = 4;
     for (let b = 1; b <= NUM_BLOCKS; b++) {
       let blockTrials = [];
-
+    
       materials.forEach((targetItem, idx) => {
-        // Collect valid non-pair foil candidates using mp_id
+        // Collect valid non-pair foil candidates using mp_id (22 items)
         const nonPairCandidates = materials.filter(m => m.mp_id.trim() !== targetItem.mp_id.trim());
         
-        // Select deterministic foil index per block to ensure balanced distribution
-        const foilIndex = (idx + (b * 3)) % nonPairCandidates.length;
+        // Shift by 5 per block to cleanly sample through the 22 candidates
+        const foilIndex = (idx + (b * 5)) % nonPairCandidates.length;
         const foilItem = nonPairCandidates[foilIndex];
-
-        // Randomize image placement (Left/Right)
+    
         const targetOnLeft = Math.random() < 0.5;
         const leftImg = targetOnLeft ? targetItem.item_id.trim() : foilItem.item_id.trim();
         const rightImg = targetOnLeft ? foilItem.item_id.trim() : targetItem.item_id.trim();
         const correctKey = targetOnLeft ? 'f' : 'j';
-
+    
         blockTrials.push({
           target_id: targetItem.item_id.trim(),
           mp_id: targetItem.mp_id.trim(),
@@ -195,9 +194,9 @@
         });
       });
 
-      let orderedTrials = shuffleWithoutConsecutivePairs(blockTrials);
-      orderedTrials.forEach(t => addTrialSequence(t));
-    }
+  let orderedTrials = shuffleWithoutConsecutivePairs(blockTrials);
+  orderedTrials.forEach(t => addTrialSequence(t));
+}
 
     // 4. Generate Final Test Block (Block 5: Minimal Pair Foils)
     let testTrials = [];
