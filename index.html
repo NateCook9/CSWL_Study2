@@ -74,17 +74,16 @@
 </body>
 <script>
   // 1. Participant ID & Counterbalancing Group Assignment
-  const subject_id = jsPsychRandom.randomID(8);
-  // Hash ID string to assign odd/even group
-  const group_num = (subject_id.charCodeAt(0) % 2 === 0) ? 1 : 2;
-
-  const jsPsych = initJsPsych({
+    const jsPsych = initJsPsych({
     on_finish: function() {
-      // Local CSV download for testing
       jsPsych.data.get().localSave('csv', `cswl_data_${subject_id}.csv`);
     }
   });
-
+  
+  // Access randomisation via the jsPsych instance or native JS
+  const subject_id = jsPsych.randomization.randomID(8);
+  const group_num = (subject_id.charCodeAt(0) % 2 === 0) ? 1 : 2;
+  
   // Save subject global properties to jsPsych data
   jsPsych.data.addProperties({
     subject_id: subject_id,
