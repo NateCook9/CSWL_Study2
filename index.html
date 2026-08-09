@@ -73,11 +73,22 @@
   <div id="jspsych-target"></div>
 </body>
 <script>
+  // 1. Participant ID & Counterbalancing Group Assignment
+  const subject_id = jsPsychRandom.randomID(8);
+  // Hash ID string to assign odd/even group
+  const group_num = (subject_id.charCodeAt(0) % 2 === 0) ? 1 : 2;
+
   const jsPsych = initJsPsych({
     on_finish: function() {
       // Local CSV download for testing
-      jsPsych.data.get().localSave('csv', 'cswl_experiment_data.csv');
+      jsPsych.data.get().localSave('csv', `cswl_data_${subject_id}.csv`);
     }
+  });
+
+  // Save subject global properties to jsPsych data
+  jsPsych.data.addProperties({
+    subject_id: subject_id,
+    counterbalance_group: group_num
   });
 
   let timeline = [];
@@ -111,13 +122,12 @@
     return shuffled;
   }
 
-  // Fetch material info CSV from GitHub Pages root
+  // Load material_info.csv
   Papa.parse('material_info.csv', {
     download: true,
     header: true,
     skipEmptyLines: true,
     complete: function(results) {
-      // Filter rows checking exact header names from material_info.csv
       const materials = results.data.filter(row => row.item_id && row.mp_id);
       
       if (materials.length === 0) {
@@ -130,11 +140,47 @@
   });
 
   function runExperiment(materials) {
-    // Collect all asset paths for preloading (trimming spaces)
-    const audioFiles = materials.map(m => `assets/audio/${m.item_id.trim()}.mp3`);
-    const imageFiles = materials.map(m => `assets/stims/${m.item_id.trim()}.png`);
+    // 2. Map Voice Condition per Minimal Pair based on Group
+    // Sort distinct mp_ids alphabetically to ensure deterministic split across participants
+    const unique_mp_ids = [...new Set(materials.map(m => m.mp_id.trim()))].sort();
+    const setA_mp_ids = unique_mp_ids.slice(0, Math.ceil(unique_mp_ids.length / 2));
 
-    // 1. Asset Preloader Stage
+    // Determine path & source per item
+    const materialsWithVoice = materials.map(m => {
+      const item = { ...m };
+      const mp_id = item.mp_id.trim();
+      const item_id = item.item_id.trim();
+      
+      const isSetA = setA_mp_ids.includes(mp_id);
+      
+      // Group 1: Set A = Human, Set B = TTS
+      // Group 2: Set A = TTS, Set B = Human
+      let voice_source = 'human';
+      if (group_num === 1) {
+        voice_source = isSetA ? 'human' : 'tts';
+      } else {
+        voice_source = isSetA ? 'tts' : 'human';
+      }
+
+      const human_dist = item.human_distance ? parseFloat(item.human_distance) : null;
+      const tts_dist = item.tts_distance ? parseFloat(item.tts_distance) : null;
+      const acoustic_distance = (voice_source === 'human') ? human_dist : tts_dist;
+
+      return {
+        ...item,
+        item_id: item_id,
+        mp_id: mp_id,
+        voice_source: voice_source,
+        acoustic_distance: acoustic_distance,
+        audio_path: `assets/audio/${voice_source}/${item_id}.mp3`,
+        image_path: `assets/stims/${item_id}.png`
+      };
+    });
+
+    // 3. Preload Stage (Both Human & TTS Audio Paths)
+    const audioFiles = materialsWithVoice.map(m => m.audio_path);
+    const imageFiles = materialsWithVoice.map(m => m.image_path);
+
     timeline.push({
       type: jsPsychPreload,
       audio: audioFiles,
@@ -144,7 +190,7 @@
       auto_preload: false
     });
 
-    // 2. Instructions Page
+    // 4. Instructions Page
     timeline.push({
       type: jsPsychHtmlButtonResponse,
       stimulus: `
@@ -163,28 +209,32 @@
       button_html: '<button class="btn-continue">%choice%</button>'
     });
 
-    // 3. Generate Learning Blocks (Blocks 1–4)
+    // 5. Generate Learning Blocks (Blocks 1–4)
     const NUM_BLOCKS = 4;
     for (let b = 1; b <= NUM_BLOCKS; b++) {
       let blockTrials = [];
-    
-      materials.forEach((targetItem, idx) => {
-        // Collect valid non-pair foil candidates using mp_id (22 items)
-        const nonPairCandidates = materials.filter(m => m.mp_id.trim() !== targetItem.mp_id.trim());
+
+      materialsWithVoice.forEach((targetItem, idx) => {
+        // Collect valid non-pair foil candidates using mp_id
+        const nonPairCandidates = materialsWithVoice.filter(m => m.mp_id !== targetItem.mp_id);
         
-        // Shift by 5 per block to cleanly sample through the 22 candidates
+        // Offset shift per block to sample foils evenly
         const foilIndex = (idx + (b * 5)) % nonPairCandidates.length;
         const foilItem = nonPairCandidates[foilIndex];
-    
+
+        // Randomize image placement (Left/Right)
         const targetOnLeft = Math.random() < 0.5;
-        const leftImg = targetOnLeft ? targetItem.item_id.trim() : foilItem.item_id.trim();
-        const rightImg = targetOnLeft ? foilItem.item_id.trim() : targetItem.item_id.trim();
+        const leftImg = targetOnLeft ? targetItem.item_id : foilItem.item_id;
+        const rightImg = targetOnLeft ? foilItem.item_id : targetItem.item_id;
         const correctKey = targetOnLeft ? 'f' : 'j';
-    
+
         blockTrials.push({
-          target_id: targetItem.item_id.trim(),
-          mp_id: targetItem.mp_id.trim(),
-          target_audio: `assets/audio/${targetItem.item_id.trim()}.mp3`,
+          target_id: targetItem.item_id,
+          mp_id: targetItem.mp_id,
+          mp_tones: targetItem.mp_tones,
+          voice_source: targetItem.voice_source,
+          acoustic_distance: targetItem.acoustic_distance,
+          target_audio: targetItem.audio_path,
           left_image: `assets/stims/${leftImg}.png`,
           right_image: `assets/stims/${rightImg}.png`,
           correct_response: correctKey,
@@ -194,25 +244,28 @@
         });
       });
 
-  let orderedTrials = shuffleWithoutConsecutivePairs(blockTrials);
-  orderedTrials.forEach(t => addTrialSequence(t));
-}
+      let orderedTrials = shuffleWithoutConsecutivePairs(blockTrials);
+      orderedTrials.forEach(t => addTrialSequence(t));
+    }
 
-    // 4. Generate Final Test Block (Block 5: Minimal Pair Foils)
+    // 6. Generate Final Test Block (Block 5: Minimal Pair Foils)
     let testTrials = [];
-    materials.forEach(targetItem => {
+    materialsWithVoice.forEach(targetItem => {
       // Foil is strictly the minimal pair partner matching mp_id
-      const partnerItem = materials.find(m => m.mp_id.trim() === targetItem.mp_id.trim() && m.item_id.trim() !== targetItem.item_id.trim());
+      const partnerItem = materialsWithVoice.find(m => m.mp_id === targetItem.mp_id && m.item_id !== targetItem.item_id);
       
       const targetOnLeft = Math.random() < 0.5;
-      const leftImg = targetOnLeft ? targetItem.item_id.trim() : partnerItem.item_id.trim();
-      const rightImg = targetOnLeft ? partnerItem.item_id.trim() : targetItem.item_id.trim();
+      const leftImg = targetOnLeft ? targetItem.item_id : partnerItem.item_id;
+      const rightImg = targetOnLeft ? partnerItem.item_id : targetItem.item_id;
       const correctKey = targetOnLeft ? 'f' : 'j';
 
       testTrials.push({
-        target_id: targetItem.item_id.trim(),
-        mp_id: targetItem.mp_id.trim(),
-        target_audio: `assets/audio/${targetItem.item_id.trim()}.mp3`,
+        target_id: targetItem.item_id,
+        mp_id: targetItem.mp_id,
+        mp_tones: targetItem.mp_tones,
+        voice_source: targetItem.voice_source,
+        acoustic_distance: targetItem.acoustic_distance,
+        target_audio: targetItem.audio_path,
         left_image: `assets/stims/${leftImg}.png`,
         right_image: `assets/stims/${rightImg}.png`,
         correct_response: correctKey,
@@ -274,6 +327,9 @@
       data: {
         target_id: trialData.target_id,
         mp_id: trialData.mp_id,
+        mp_tones: trialData.mp_tones,
+        voice_source: trialData.voice_source,
+        acoustic_distance: trialData.acoustic_distance,
         block_num: trialData.block_num,
         block_type: trialData.block_type,
         correct_response: trialData.correct_response,
